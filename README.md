@@ -53,7 +53,7 @@ pip install szl-inference-gateway
 python -m szl_inference_gateway --base https://inference.a-11-oy.com
 ```
 
-Prints a fail-closed JSON receipt of the gateway posture (health, served model IDs, x402 challenge details: network, asset, pay-to, amount). Exit code is 1 unless the gateway is healthy. No third-party dependencies; standard library only.
+Prints a fail-closed JSON receipt of health, served model IDs and the x402 v2 HTTP **PAYMENT-REQUIRED** header. The CLI returns zero only for the narrowly scoped `POSTURE_MATCH_NOT_SETTLEMENT` state: /health HTTP 200+ok, exact expected model, HTTP 402, and a valid base64 PaymentRequired header bound to the reviewed resource, Base USDC asset, payee and 20,000 atomic-unit price. Missing/malformed/contradictory values return HOLD and a nonzero exit. **This is not proof of a paid settlement, signed receipt, model quality, production uptime, app security or deployment admission.** The default probe sends one unsigned POST with max_tokens=1: do not run against an unapproved or unmetered endpoint where a missing paywall could execute inference. No third-party dependencies; standard library only.
 
 ## Repository layout
 

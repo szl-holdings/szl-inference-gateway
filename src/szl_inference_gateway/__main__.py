@@ -19,7 +19,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     receipt = probe_gateway(args.base, timeout=args.timeout)
     print(json.dumps(receipt, indent=2))
-    return 0 if receipt.get("healthy") else 1
+    admission = receipt.get("admission")
+    return 0 if isinstance(admission, dict) and admission.get("state") == "POSTURE_MATCH_NOT_SETTLEMENT" else 1
 
 
 if __name__ == "__main__":

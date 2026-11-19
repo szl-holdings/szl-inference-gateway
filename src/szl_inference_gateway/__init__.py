@@ -7,6 +7,7 @@ from .gateway import (
     parse_x402_challenge,
     probe_gateway,
 )
+from .posture import decode_payment_required_header, evaluate_posture
 
 __version__ = "0.1.0"
 
@@ -17,5 +18,7 @@ __all__ = [
     "model_ids",
     "parse_x402_challenge",
     "probe_gateway",
+    "evaluate_posture",
+    "decode_payment_required_header",
     "__version__",
 ]
