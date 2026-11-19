@@ -40,7 +40,7 @@ Mainline llama.cpp (b12359 at the time of the cutover) cannot load the `PQ2_0` q
 2. Set the environment: `CLOUDFLARED_TOKEN` = your cloudflared tunnel run token. **Never commit tokens**; the deployed instance receives it at runtime.
 3. Container command: `bash -lc recipe/entrypoint.sh`.
 
-The recipe's boot order is the load-bearing part: **model first, server second.** Nothing serves until the full model file is on disk (resume + retry + size gate), the server binary comes from the pinned fork release, all CUDA shared objects are copied onto the loader path next to the binary, and a 30 s supervision loop restarts whatever dies. If the inference server cannot come up, a diagnostic JSON server parks on the port so health probes get an honest diagnosis instead of a dead port.
+The recipe's boot order is the load-bearing part: **model first, server second.** Nothing serves until the full model file is on disk and verified (resume + retry; exact size and pinned sha256 at a pinned Hub revision; HTTP errors never written into the file), the server binary comes from the pinned fork release, all CUDA shared objects are copied onto the loader path next to the binary, and a 30 s supervision loop restarts whatever dies. If the inference server cannot come up, a diagnostic JSON server parks on the port so health probes get an honest diagnosis instead of a dead port.
 
 ## Cloudflare + x402 monetization
 

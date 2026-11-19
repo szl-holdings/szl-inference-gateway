@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# SZL Inference Gateway - v7 container boot recipe (as deployed 2026-11-15).
+# SZL Inference Gateway - v7 container boot recipe (as deployed 2026-11-15),
+# plus the fail-closed model fetch of 2026-11-19 (section 4), which a running
+# instance only carries after its next deploy.
 # The deployed instance receives the cloudflared tunnel token at runtime;
 # this script reads it from CLOUDFLARED_TOKEN. Never commit tokens.
 
@@ -38,16 +40,53 @@ echo LSBIN=$LSB >> /tmp/lane.log
 find /opt/llama -name "*.so*" -not -path "$LDD/*" -exec cp -a {} "$LDD"/ \; 2>>/tmp/lane.log
 ls "$LDD" >> /tmp/lane.log
 
-# 4. MODEL FIRST: nothing serves until the full model file is on disk.
-#    Exact published size: 7,206,168,928 bytes. Resume + retry; size-gated.
-if [ ! -s /root/bonsai.gguf ] || [ "$(stat -c%s /root/bonsai.gguf 2>/dev/null || echo 0)" -lt 7000000000 ]; then
-  echo DL_START $(date -u +%H:%M:%S) >> /tmp/lane.log
-  for a in 1 2 3 4 5 6; do
-    curl -sL --retry 3 -C - -o /root/bonsai.gguf.part "https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/main/Ternary-Bonsai-2-27B-PQ2_0.gguf" >> /tmp/lane.log 2>&1 && mv /root/bonsai.gguf.part /root/bonsai.gguf && break
-    echo DL_RETRY_$a >> /tmp/lane.log; sleep 20
+# 4. MODEL FIRST: nothing serves until the full model file is on disk and verified.
+#    Pinned to Hub revision 839bd570 (no commit since 2026-11-04, so these are the
+#    bytes behind the 2026-11-15 cutover): 7,206,168,928 bytes, LFS sha256 3907dc16...
+#    --fail keeps an HTTP error body out of the file. A short download resumes; a
+#    file of the wrong size or digest is deleted, never moved into place.
+MODEL=/root/bonsai.gguf
+MODEL_URL="https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/839bd57023c1558945afea70a74fa83c054f35f9/Ternary-Bonsai-2-27B-PQ2_0.gguf"
+MODEL_BYTES=7206168928
+MODEL_SHA256=3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1
+MODEL_ATTEMPTS=6
+MODEL_RETRY_SLEEP=20
+LANE_LOG=/tmp/lane.log
+# >>> fetch_model (tests/test_recipe_fetch_model.py runs this block as written)
+model_size() { stat -c%s "$1" 2>/dev/null || echo 0; }
+model_ok() { [ "$(model_size "$1")" = "$MODEL_BYTES" ] && [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$MODEL_SHA256" ]; }
+fetch_model() {
+  local part="$MODEL.part" a
+  if [ "$(cat "$MODEL.sha256" 2>/dev/null)" = "$MODEL_SHA256" ] && model_ok "$MODEL"; then
+    echo MODEL_OK_VERIFIED_EARLIER >> "$LANE_LOG"; return 0
+  fi
+  rm -f "$MODEL.sha256"
+  if [ -e "$MODEL" ]; then
+    if model_ok "$MODEL"; then
+      echo "$MODEL_SHA256" > "$MODEL.sha256"; echo MODEL_OK_VERIFIED >> "$LANE_LOG"; return 0
+    fi
+    echo MODEL_REJECTED_SZ_$(model_size "$MODEL") >> "$LANE_LOG"; rm -f "$MODEL"
+  fi
+  echo DL_START $(date -u +%H:%M:%S) >> "$LANE_LOG"
+  for a in $(seq 1 "$MODEL_ATTEMPTS"); do
+    curl -fsSL --retry 3 --retry-all-errors -C - -o "$part" "$MODEL_URL" >> "$LANE_LOG" 2>&1
+    if [ "$(model_size "$part")" -gt "$MODEL_BYTES" ]; then
+      echo DL_OVERSIZE_$a >> "$LANE_LOG"; rm -f "$part"
+    elif [ "$(model_size "$part")" = "$MODEL_BYTES" ]; then
+      if ! model_ok "$part"; then
+        echo DL_DIGEST_MISMATCH_$a >> "$LANE_LOG"; rm -f "$part"
+      elif mv "$part" "$MODEL"; then
+        echo "$MODEL_SHA256" > "$MODEL.sha256"; echo MODEL_OK_DOWNLOADED >> "$LANE_LOG"; return 0
+      fi
+    fi
+    echo DL_RETRY_$a >> "$LANE_LOG"; sleep "$MODEL_RETRY_SLEEP"
   done
-fi
-echo MODEL_SZ $(stat -c%s /root/bonsai.gguf 2>/dev/null || echo 0) >> /tmp/lane.log
+  echo MODEL_NOT_READY >> "$LANE_LOG"
+  return 1
+}
+# <<< fetch_model
+fetch_model || { echo MODEL_FETCH_FATAL >> "$LANE_LOG"; exit 1; }
+echo MODEL_SZ $(model_size "$MODEL") >> /tmp/lane.log
 
 # 5. Inference server.
 export LD_LIBRARY_PATH="$LDD:/opt/llama:/opt/llama/lib:$LD_LIBRARY_PATH"
