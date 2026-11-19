@@ -169,6 +169,39 @@ def test_a_model_verified_earlier_is_not_downloaded_again(rig):
     assert "MODEL_OK_VERIFIED_EARLIER" in log
 
 
+def test_same_size_corrupt_model_with_cached_marker_is_rejected(rig):
+    # The marker is an optimisation hint, never an integrity certificate.
+    assert rig()[0] == 0
+    rig.model.write_bytes(b"x" * len(PAYLOAD))
+    rc, calls, log = rig(mode="http_error")
+    assert rc == 1
+    assert not rig.model.exists()
+    assert not (rig.model.parent / "bonsai.gguf.sha256").exists()
+    assert len(calls) == 3
+    assert "MODEL_REJECTED_SZ_" in log
+
+
+def test_cached_marker_does_not_skip_fresh_model_hash(rig):
+    assert rig()[0] == 0
+    rig.model.write_bytes(b"x" * len(PAYLOAD))
+    rc, calls, log = rig(mode="ok")
+    assert rc == 0
+    assert len(calls) == 1
+    assert rig.model.read_bytes() == PAYLOAD
+    assert "MODEL_OK_DOWNLOADED" in log
+
+
+def test_failed_fetch_is_a_fatal_entrypoint_gate():
+    # Check the REAL section-4 invocation, rather than a test-only wrapper.
+    text = RECIPE.read_text()
+    call = re.search(r"(?m)^fetch_model \|\| \{[^\n]*exit 1; \}$", text)
+    assert call is not None, "the container must exit before starting the server"
+    server = text.index("# 5. Inference server.")
+    marker = text.index("# <<< fetch_model")
+    assert marker < call.start() < server
+    assert "MODEL_FETCH_FATAL" in call.group(0)
+
+
 def test_an_unmarked_model_is_hashed_once_then_kept(rig):
     rig.model.write_bytes(PAYLOAD)
     rc, calls, log = rig(mode="http_error")
