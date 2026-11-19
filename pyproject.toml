@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "szl-inference-gateway"
+version = "0.1.0"
+description = "SZL Inference Gateway: the x402-metered SaladCloud inference gateway behind inference.a-11-oy.com - boot recipe, supervision, and a fail-closed posture probe."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Stephen Lutar", email = "stephen@szlholdings.com" }]
+keywords = ["governed-ai", "szl-holdings", "inference", "x402", "llama-cpp", "saladcloud", "cloudflare", "monetization"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=9.2.0,<10"]
+
+[project.urls]
+Homepage = "https://inference.a-11-oy.com"
+Source = "https://github.com/szl-holdings/szl-inference-gateway"
+Issues = "https://github.com/szl-holdings/szl-inference-gateway/issues"
+"Live gateway" = "https://inference.a-11-oy.com"
+"Hugging Face model" = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf"
+"x402 specification" = "https://github.com/x402-foundation/x402"
+
+[tool.szl.release]
+import_names = ["szl_inference_gateway"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]

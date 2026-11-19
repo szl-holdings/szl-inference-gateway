@@ -1,0 +1,15 @@
+SZL Inference Gateway
+Copyright 2026 SZL Holdings
+
+This product includes the SZL Inference Gateway boot recipe and posture
+probe package developed by SZL Holdings
+(https://github.com/szl-holdings/szl-inference-gateway).
+
+Third-party components used by deployments of this recipe:
+
+- llama.cpp, MIT license, as built by the PrismML-Eng fork
+  (https://github.com/PrismML-Eng/llama.cpp), release prism-b12128-d7b2896.
+- cloudflared, by Cloudflare (https://github.com/cloudflare/cloudflared).
+- The Ternary-Bonsai-2-27B model weights are distributed by their publisher
+  on the Hugging Face Hub under their own license
+  (https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf).
