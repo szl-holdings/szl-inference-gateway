@@ -6,6 +6,7 @@ error string - this package never fabricates a ready state.
 from __future__ import annotations
 
 import json
+from .posture import evaluate_posture
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -81,17 +82,29 @@ def model_ids(body: str) -> list[str]:
 
 
 def _request(base_url: str, path: str, *, method: str = "GET",
-             payload: dict | None = None, timeout: float = 30.0) -> tuple[int, str]:
+             payload: dict | None = None, timeout: float = 30.0,
+             include_headers: bool = False):
+    """Request with bounded response bytes; preserve x402 v2 HTTP headers."""
     data = json.dumps(payload).encode() if payload is not None else None
     headers = {"User-Agent": USER_AGENT}
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(base_url.rstrip("/") + path, data=data, method=method, headers=headers)
+
+    def result(status: int, response):
+        raw = response.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("PROBE_RESPONSE_BYTE_BUDGET")
+        body = raw.decode("utf-8", "replace")
+        if include_headers:
+            return status, body, {str(k).lower(): str(v) for k, v in response.headers.items()}
+        return status, body
+
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read().decode("utf-8", "replace")
+            return result(resp.status, resp)
     except urllib.error.HTTPError as err:
-        return err.code, err.read().decode("utf-8", "replace")
+        return result(err.code, err)
 
 
 def _err(exc: Exception) -> str:
@@ -124,7 +137,7 @@ def probe_gateway(base_url: str = DEFAULT_BASE_URL, timeout: float = 30.0) -> di
         receipt["models"] = {"error": _err(exc)}
 
     try:
-        status, body = _request(
+        status, body, response_headers = _request(
             base_url,
             "/v1/chat/completions",
             method="POST",
@@ -134,9 +147,12 @@ def probe_gateway(base_url: str = DEFAULT_BASE_URL, timeout: float = 30.0) -> di
                 "max_tokens": 1,
             },
             timeout=timeout,
+            include_headers=True,
         )
         entry: dict = {"status": status}
         if status == 402:
+            entry["payment_required_header"] = response_headers.get("payment-required")
+            entry["payment_required_body"] = body
             challenge = parse_x402_challenge(body)
             if challenge is None:
                 entry["x402"] = {"error": "402 without a parseable x402 challenge"}
@@ -150,9 +166,12 @@ def probe_gateway(base_url: str = DEFAULT_BASE_URL, timeout: float = 30.0) -> di
                     "amount_display": challenge.amount_display,
                     "max_timeout_seconds": challenge.max_timeout_seconds,
                 }
-                receipt["monetized"] = True
         receipt["chat"] = entry
     except Exception as exc:
         receipt["chat"] = {"error": _err(exc)}
 
+    # This is an unsigned posture observation, not a verified payment or
+    # deployment certificate. A bare 200 /health must never qualify the CLI.
+    receipt["admission"] = evaluate_posture(receipt)
+    receipt["monetized"] = receipt["admission"]["state"] == "POSTURE_MATCH_NOT_SETTLEMENT"
     return receipt
