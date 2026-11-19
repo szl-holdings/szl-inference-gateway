@@ -57,7 +57,7 @@ model_size() { stat -c%s "$1" 2>/dev/null || echo 0; }
 model_ok() { [ "$(model_size "$1")" = "$MODEL_BYTES" ] && [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$MODEL_SHA256" ]; }
 fetch_model() {
   local part="$MODEL.part" a
-  if [ "$(cat "$MODEL.sha256" 2>/dev/null)" = "$MODEL_SHA256" ] && [ "$(model_size "$MODEL")" = "$MODEL_BYTES" ]; then
+  if [ "$(cat "$MODEL.sha256" 2>/dev/null)" = "$MODEL_SHA256" ] && model_ok "$MODEL"; then
     echo MODEL_OK_VERIFIED_EARLIER >> "$LANE_LOG"; return 0
   fi
   rm -f "$MODEL.sha256"
@@ -85,7 +85,7 @@ fetch_model() {
   return 1
 }
 # <<< fetch_model
-fetch_model
+fetch_model || { echo MODEL_FETCH_FATAL >> "$LANE_LOG"; exit 1; }
 echo MODEL_SZ $(model_size "$MODEL") >> /tmp/lane.log
 
 # 5. Inference server.
