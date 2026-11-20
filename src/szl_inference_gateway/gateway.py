@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import json
 import math
-from .posture import evaluate_posture
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+
+from .posture import evaluate_posture, strict_payment_json_loads
 
 DEFAULT_BASE_URL = "https://inference.a-11-oy.com"
 SERVED_MODEL_ALIAS = "ternary-bonsai-2-27b-pq2_0"
@@ -48,9 +49,9 @@ class X402Challenge:
 
 
 def parse_x402_challenge(body: str) -> X402Challenge | None:
-    """Parse an x402 v2 payment-challenge body; None when it is not one."""
+    """Parse a strict x402 v2 challenge; refuse duplicate-key ambiguities."""
     try:
-        doc = json.loads(body)
+        doc = strict_payment_json_loads(body)
     except (TypeError, ValueError):
         return None
     if not isinstance(doc, dict) or doc.get("x402Version") != 2:

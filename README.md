@@ -53,7 +53,7 @@ pip install szl-inference-gateway
 python -m szl_inference_gateway --base https://inference.a-11-oy.com
 ```
 
-**Default is now GET-only.** The CLI reads `/health` and `/v1/models`, never sends an unsigned POST, and returns an honest `HOLD` with `NOT_PROBED_READ_ONLY` even when both GET endpoints return HTTP 200. A read-only check therefore exits nonzero by design; it is not a payment or generation test.
+**Default is now GET-only.** The CLI reads `/health` and `/v1/models`, never sends an unsigned POST, and returns an honest `HOLD` with `NOT_PROBED_READ_ONLY` even when both GET endpoints return HTTP 200. The x402 posture parser also rejects conflicting duplicate JSON keys in either the canonical `PAYMENT-REQUIRED` header or an explicit JSON challenge body; ambiguous payment terms remain `HOLD`, not a posture match or settlement. A read-only check therefore exits nonzero by design; it is not a payment or generation test.
 
 For an **independently authorized** bounded x402 challenge check only, the operator must explicitly pass *both* `--allow-unsigned-post --acknowledge-inference-risk`. This sends **one** anonymous `POST /v1/chat/completions` with `max_tokens=1` to the exact canonical HTTPS host, without following redirects. **If the paywall and origin authorization are missing, that one request can execute model generation or spend GPU. Do not run it without separate approval.** An unsigned 402 challenge matches only `POSTURE_MATCH_NOT_SETTLEMENT`, never settlement, source integrity, independent JWT validation, model quality, uptime or production admission. The probe itself uses only the Python standard library and cannot validate Cloudflare's origin `PAYMENT-CONTEXT` signature.
 
