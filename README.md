@@ -1,10 +1,10 @@
 # SZL Inference Gateway
 
-Production **x402-metered LLM inference on SaladCloud GPUs**. This repository is the complete source of the gateway behind **[inference.a-11-oy.com](https://inference.a-11-oy.com)**: the container boot recipe, supervision and diagnostic fallback, the Cloudflare tunnel wiring, and a fail-closed Python probe used to verify the gateway from the outside.
+Source and public posture checks for the **x402-metered inference gateway** on SaladCloud GPUs. This repository contains the boot recipe, supervision, diagnostic fallback, and a fail-closed Python audit. **Cloudflare challenges are not proof that the origin verifies signed PAYMENT-CONTEXT or that paid generation is safe.** Production origin authorization remains **HOLD** pending separately reviewed signed-JWT verification and live negative tests (see issue #7).
 
-## Measured live
+## Historical public reachability observation (2026-11-15; not current release admission)
 
-Observed from the public internet (the same probe this package ships):
+Previously observed from the public internet (the prior opt-in probe's request shape):
 
 - `GET /health` → **HTTP 200** `{"status":"ok"}`
 - `GET /v1/models` → **HTTP 200**, model `ternary-bonsai-2-27b-pq2_0` (26.9B parameters, GGUF `PQ2_0` quantization)
@@ -53,7 +53,9 @@ pip install szl-inference-gateway
 python -m szl_inference_gateway --base https://inference.a-11-oy.com
 ```
 
-Prints a fail-closed JSON receipt of health, served model IDs and the x402 v2 HTTP **PAYMENT-REQUIRED** header. The CLI returns zero only for the narrowly scoped `POSTURE_MATCH_NOT_SETTLEMENT` state: /health HTTP 200+ok, exact expected model, HTTP 402, and a valid base64 PaymentRequired header bound to the reviewed resource, Base USDC asset, payee and 20,000 atomic-unit price. Missing/malformed/contradictory values return HOLD and a nonzero exit. **This is not proof of a paid settlement, signed receipt, model quality, production uptime, app security or deployment admission.** The default probe sends one unsigned POST with max_tokens=1: do not run against an unapproved or unmetered endpoint where a missing paywall could execute inference. No third-party dependencies; standard library only.
+**Default is now GET-only.** The CLI reads `/health` and `/v1/models`, never sends an unsigned POST, and returns an honest `HOLD` with `NOT_PROBED_READ_ONLY` even when both GET endpoints return HTTP 200. A read-only check therefore exits nonzero by design; it is not a payment or generation test.
+
+For an **independently authorized** bounded x402 challenge check only, the operator must explicitly pass *both* `--allow-unsigned-post --acknowledge-inference-risk`. This sends **one** anonymous `POST /v1/chat/completions` with `max_tokens=1` to the exact canonical HTTPS host, without following redirects. **If the paywall and origin authorization are missing, that one request can execute model generation or spend GPU. Do not run it without separate approval.** An unsigned 402 challenge matches only `POSTURE_MATCH_NOT_SETTLEMENT`, never settlement, source integrity, independent JWT validation, model quality, uptime or production admission. The probe itself uses only the Python standard library and cannot validate Cloudflare's origin `PAYMENT-CONTEXT` signature.
 
 ## Repository layout
 
@@ -65,7 +67,7 @@ Prints a fail-closed JSON receipt of health, served model IDs and the x402 v2 HT
 
 ## Scope & limits
 
-This repository documents and reproduces the gateway. It does not claim model quality, SLA, uptime, or paid-transaction correctness beyond the receipts linked above. Fail-closed: the probe reports what it measured, or an error - never a fake ready state.
+This repository documents the source-owned gateway and separately distinguishes read-only discovery, x402 challenge posture and origin authorization. **The source boot recipe does not yet enforce the origin-side signed PAYMENT-CONTEXT gate.** It does not claim model quality, SLA, uptime, or paid-transaction correctness beyond the receipts linked above. Fail-closed: the probe reports what it measured, or an error - never a fake ready state.
 
 ## License
 
