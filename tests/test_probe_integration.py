@@ -22,7 +22,7 @@ def mock_request(base_url, path, **kwargs):
 
 def test_mocked_full_posture(monkeypatch):
     monkeypatch.setattr(gateway, "_request", mock_request)
-    r = gateway.probe_gateway()
+    r = gateway.probe_gateway(allow_unsigned_post=True, acknowledge_inference_risk=True)
     assert r["healthy"] is True
     assert r["admission"]["state"] == "POSTURE_MATCH_NOT_SETTLEMENT"
     assert r["admission"]["payment_settlement_verified"] is False
@@ -35,7 +35,7 @@ def test_mocked_bad_model_holds(monkeypatch):
             return 200, '{"data":[{"id":"unrelated-model"}]}'
         return mock_request(base_url, path, **kwargs)
     monkeypatch.setattr(gateway, "_request", bad_model)
-    r = gateway.probe_gateway()
+    r = gateway.probe_gateway(allow_unsigned_post=True, acknowledge_inference_risk=True)
     assert r["healthy"] is True
     assert r["admission"]["state"] == "HOLD"
     assert not r["monetized"]
@@ -48,7 +48,7 @@ def test_mocked_body_only_holds(monkeypatch):
             return x[0], x[1], {}
         return mock_request(base_url, path, **kwargs)
     monkeypatch.setattr(gateway, "_request", body_only)
-    r = gateway.probe_gateway()
+    r = gateway.probe_gateway(allow_unsigned_post=True, acknowledge_inference_risk=True)
     assert r["admission"]["state"] == "HOLD"
     assert "CANONICAL_X402_V2_HEADER_UNAVAILABLE" in r["admission"]["reasons"]
 
@@ -61,7 +61,7 @@ def test_mocked_health_only_holds(monkeypatch):
             raise TimeoutError("CHAT_TIMEOUT")
         return mock_request(base_url, path, **kwargs)
     monkeypatch.setattr(gateway, "_request", bad)
-    r = gateway.probe_gateway()
+    r = gateway.probe_gateway(allow_unsigned_post=True, acknowledge_inference_risk=True)
     assert r["healthy"] is True
     assert r["admission"]["state"] == "HOLD"
 
@@ -73,7 +73,7 @@ def test_cli_refuses_bare_health(monkeypatch, capsys):
 
 def test_cli_accepts_only_limited_posture(monkeypatch, capsys):
     monkeypatch.setattr(cli, "probe_gateway", lambda *a, **kw: {"healthy": True, "admission": {"state":"POSTURE_MATCH_NOT_SETTLEMENT"}})
-    assert cli.main([]) == 0
+    assert cli.main(['--allow-unsigned-post', '--acknowledge-inference-risk']) == 0
 
 
 def test_transport_captures_canonical_http_402_header(monkeypatch):
@@ -87,7 +87,7 @@ def test_transport_captures_canonical_http_402_header(monkeypatch):
             request.full_url, 402, "Payment Required",
             {"PAYMENT-REQUIRED": encoded}, io.BytesIO(json.dumps(doc).encode()),
         )
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(gateway, "_urlopen_no_redirect", fake_urlopen)
     status, body, headers = gateway._request(gateway.DEFAULT_BASE_URL, "/v1/chat/completions",
                                               method="POST", payload={"test": True}, include_headers=True)
     assert status == 402
@@ -104,7 +104,7 @@ def test_transport_rejects_oversize_http_body(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *args): return False
         def read(self, limit): return b"a" * (limit + 1)
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(gateway, "_urlopen_no_redirect", lambda *a, **kw: FakeResponse())
     import pytest
     with pytest.raises(ValueError, match="PROBE_RESPONSE_BYTE_BUDGET"):
         gateway._request(gateway.DEFAULT_BASE_URL, "/health")
