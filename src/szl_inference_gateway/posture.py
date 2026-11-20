@@ -26,6 +26,28 @@ _ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}\Z")
 _AMOUNT = re.compile(r"[1-9][0-9]{0,24}\Z")
 
 
+class DuplicatePaymentField(ValueError):
+    """Ambiguous x402 JSON is not valid protocol-posture evidence."""
+
+
+def _reject_duplicate_payment_fields(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise DuplicatePaymentField("DUPLICATE_PAYMENT_JSON_KEY")
+        obj[key] = value
+    return obj
+
+
+def strict_payment_json_loads(body):
+    """Parse x402 JSON with duplicate rejection at every object depth."""
+    return json.loads(
+        body,
+        object_pairs_hook=_reject_duplicate_payment_fields,
+        parse_constant=lambda _: (_ for _ in ()).throw(ValueError("NONFINITE_PAYMENT_JSON")),
+    )
+
+
 def decode_payment_required_header(value: Any) -> dict[str, Any] | None:
     """Decode x402 v2 HTTP PAYMENT-REQUIRED; reject malformed/unbounded headers."""
     if type(value) is not str or not 4 <= len(value) <= MAX_HEADER_BYTES:
@@ -34,7 +56,7 @@ def decode_payment_required_header(value: Any) -> dict[str, Any] | None:
         blob = base64.b64decode(value, validate=True)
         if len(blob) > MAX_DECODED_BYTES:
             return None
-        doc = json.loads(blob.decode("utf-8", "strict"))
+        doc = strict_payment_json_loads(blob.decode("utf-8", "strict"))
     except (ValueError, UnicodeError, binascii.Error, TypeError, RecursionError):
         return None
     return doc if type(doc) is dict else None
@@ -114,7 +136,12 @@ def evaluate_posture(receipt: Any) -> dict[str, Any]:
             reasons.append("PAYMENT_BODY_UNSUPPORTED")
         else:
             try:
-                body_doc = json.loads(body)
+                body_doc = strict_payment_json_loads(body)
+            except DuplicatePaymentField:
+                # Ordinary HTML/text 402 bodies may be unparseable, but an
+                # explicit contradictory JSON object is not benign evidence.
+                reasons.append("PAYMENT_BODY_AMBIGUOUS_JSON")
+                body_doc = None
             except (ValueError, TypeError, RecursionError):
                 body_doc = None
             if type(body_doc) is dict and "x402Version" in body_doc:
