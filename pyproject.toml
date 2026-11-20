@@ -25,7 +25,8 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest>=9.2.0,<10"]
+test = ["pytest>=9.2.0,<10", "PyJWT==2.15.1", "cryptography>=44,<51"]
+origin-shadow = ["PyJWT==2.15.1", "cryptography>=44,<51"]
 
 [project.urls]
 Homepage = "https://inference.a-11-oy.com"
