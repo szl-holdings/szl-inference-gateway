@@ -126,6 +126,15 @@ def test_replaying_identical_signed_token_never_authorizes_backend(evidence):
     assert first["inference_forward_authorized"] is False
 
 
+def test_unhashable_request_resource_is_fixed_hold_not_exception(evidence):
+    *_, check = evidence
+    for resource in ([], {}, ["POST"], {"url": AUD}):
+        outcome = check(resource=resource)
+        assert outcome["state"] == "HOLD"
+        assert outcome["reason"] == "COMPUTE_ROUTE_NOT_APPROVED"
+        assert outcome["inference_forward_authorized"] is False
+
+
 def test_missing_header_rejected(evidence):
     _, jwks, pin, _, _, _ = evidence
     r = shadow.shadow_verify(None, jwks, pin, method="POST", resource=AUD, now_unix=NOW)

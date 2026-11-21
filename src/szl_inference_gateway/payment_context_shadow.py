@@ -143,7 +143,12 @@ def _check_context(
     now_unix: int,
 ) -> None:
     """Validate claims to a *source-only observation*. Never authorizes forwarding."""
-    if method != "POST" or resource not in PAID_URLS:
+    if (
+        type(method) is not str
+        or method != "POST"
+        or type(resource) is not str
+        or resource not in PAID_URLS
+    ):
         _hold("COMPUTE_ROUTE_NOT_APPROVED")
     if type(now_unix) is not int or not 0 < now_unix < 2**53:
         _hold("CLOCK_UNAVAILABLE")
