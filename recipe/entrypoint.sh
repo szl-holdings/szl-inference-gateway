@@ -159,7 +159,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 try:
-    http.server.ThreadingHTTPServer(("127.0.0.1", 11434), Handler).serve_forever()
+    port = int(os.environ.get("ORIGIN_BACKEND_PORT", "11435"))
+    http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 except OSError:
     pass
 PYEOF
@@ -170,11 +171,12 @@ sleep 30
 while true; do
   sleep 30
   up cf.pid || { /root/cloudflared tunnel --no-autoupdate run --token "$CLOUDFLARED_TOKEN" > /tmp/cloudflared.log 2>&1 & echo $! > /root/cf.pid; }
+  up origin-gate.pid || { PAYMENT_CONTEXT_JWKS_FILE="$PAYMENT_CONTEXT_JWKS_FILE" PAYMENT_CONTEXT_JWKS_SHA256="$PAYMENT_CONTEXT_JWKS_SHA256" python3 recipe/origin_proxy.py --backend-port "$ORIGIN_BACKEND_PORT" > /tmp/origin_gate.log 2>&1 & echo $! > /root/origin-gate.pid; }
   if ! up llama.pid; then
     kill "$(cat /root/diag.pid 2>/dev/null)" 2>/dev/null; sleep 1
     LSB=$(find /opt/llama -name llama-server -type f | head -1); LDD2=$(dirname "$LSB")
     find /opt/llama -name "*.so*" -exec cp -a {} "$LDD2"/ \; 2>/dev/null
-    LD_LIBRARY_PATH="$LDD2:/opt/llama:/opt/llama/lib:$LD_LIBRARY_PATH" "$LSB" -m /root/bonsai.gguf --alias ternary-bonsai-2-27b-pq2_0 --host 127.0.0.1 --port 11434 -c 8192 -ngl 99 > /tmp/llama_server.log 2>&1 &
+    LD_LIBRARY_PATH="$LDD2:/opt/llama:/opt/llama/lib:$LD_LIBRARY_PATH" "$LSB" -m /root/bonsai.gguf --alias ternary-bonsai-2-27b-pq2_0 --host 127.0.0.1 --port "$ORIGIN_BACKEND_PORT" -c 8192 -ngl 99 > /tmp/llama_server.log 2>&1 &
     echo $! > /root/llama.pid
     echo RETRY_LLAMA_$(date -u +%H:%M:%S) >> /tmp/lane.log
     sleep 25
