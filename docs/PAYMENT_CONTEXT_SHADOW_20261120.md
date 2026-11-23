@@ -1,10 +1,11 @@
-# Cloudflare PAYMENT-CONTEXT signed-claim shadow verification
+# Historical Cloudflare PAYMENT-CONTEXT signed-claim shadow verification
 
-**SOURCE-ONLY SHADOW — NOT DEPLOYED, NOT PRODUCTION AUTHORIZATION.**
+**HISTORICAL SHADOW RECORD — superseded for source admission by `origin_gate.py` and `recipe/origin_proxy.py`.**
 
-The production recipe currently tunnels directly to raw llama-server.
-This PR does not repair the live origin, change Cloudflare, or authorize
-inference. The production HOLD is tracked under SZL inference-gateway #7.
+This document records the pre-gate state from 2026-11-20. The current recipe
+terminates the tunnel at the signed loopback origin proxy and keeps llama-server
+on a private backend port. Live deployment evidence and key custody remain
+separate review items.
 Existing $0.02 Cloudflare payment rules are not touched.
 
 Official requirements:
@@ -48,10 +49,11 @@ payments. No test account signer or private key is stored in the repo.
 6. Require independent human review, exact-head CI, signed runtime
    receipts, canary/bake/rollback and actual settlement reconciliation.
 
-The source module deliberately contains NO proxy server or callback that
-forwards requests; even cryptographically matched claims remain HOLD for
-production. No paid job, wallet, key read, DNS change, rule edit or
-Cloudflare settlement occurred.
+The historical shadow module deliberately contains NO proxy server or callback
+that forwards requests. The current forwarding path is the separately reviewed
+origin proxy described in `docs/PAYMENT_CONTEXT_GATE.md`. No paid job, wallet,
+key read, DNS change, rule edit or Cloudflare settlement occurred during this
+source change.
 
 ## Test procedure
 
