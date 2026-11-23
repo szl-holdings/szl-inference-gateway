@@ -15,6 +15,17 @@ if [ -z "$CLOUDFLARED_TOKEN" ]; then
   exit 1
 fi
 
+# The tunnel must terminate at the signed origin gate. The key document is
+# injected as a runtime secret and never stored in this repository.
+PAYMENT_CONTEXT_JWKS_FILE="${PAYMENT_CONTEXT_JWKS_FILE:-/run/secrets/payment-context-jwks.json}"
+PAYMENT_CONTEXT_JWKS_SHA256="${PAYMENT_CONTEXT_JWKS_SHA256:-}"
+if [ ! -s "$PAYMENT_CONTEXT_JWKS_FILE" ] || [ -z "$PAYMENT_CONTEXT_JWKS_SHA256" ]; then
+  echo "FATAL: PAYMENT_CONTEXT_JWKS_FILE and PAYMENT_CONTEXT_JWKS_SHA256 are required" >&2
+  exit 1
+fi
+export PAYMENT_CONTEXT_JWKS_FILE PAYMENT_CONTEXT_JWKS_SHA256
+ORIGIN_BACKEND_PORT=11435
+
 printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf 2>/dev/null || true
 apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq curl >/dev/null 2>&1 || true
 
@@ -88,13 +99,22 @@ fetch_model() {
 fetch_model || { echo MODEL_FETCH_FATAL >> "$LANE_LOG"; exit 1; }
 echo MODEL_SZ $(model_size "$MODEL") >> /tmp/lane.log
 
-# 5. Inference server.
+# 5. Inference server. It is reachable only through the origin gate on :11434.
 export LD_LIBRARY_PATH="$LDD:/opt/llama:/opt/llama/lib:$LD_LIBRARY_PATH"
-"$LSB" -m /root/bonsai.gguf --alias ternary-bonsai-2-27b-pq2_0 --host 127.0.0.1 --port 11434 -c 8192 -ngl 99 > /tmp/llama_server.log 2>&1 &
+"$LSB" -m /root/bonsai.gguf --alias ternary-bonsai-2-27b-pq2_0 --host 127.0.0.1 --port "$ORIGIN_BACKEND_PORT" -c 8192 -ngl 99 > /tmp/llama_server.log 2>&1 &
 echo $! > /root/llama.pid
 sleep 40
 
-# 6. Tunnel: cloudflared with the tunnel run token from the environment.
+# 6. Signed origin gate. The public tunnel port is never the raw llama port.
+python3 recipe/origin_proxy.py --backend-port "$ORIGIN_BACKEND_PORT" > /tmp/origin_gate.log 2>&1 &
+echo $! > /root/origin-gate.pid
+sleep 2
+if ! kill -0 "$(cat /root/origin-gate.pid)" 2>/dev/null; then
+  echo ORIGIN_GATE_FATAL >> /tmp/lane.log
+  exit 1
+fi
+
+# 7. Tunnel: cloudflared with the tunnel run token from the environment.
 if [ ! -x /root/cloudflared ]; then
   curl -fsSL --retry 3 -o /root/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 >> /tmp/lane.log 2>&1
   chmod +x /root/cloudflared
@@ -102,7 +122,7 @@ fi
 /root/cloudflared tunnel --no-autoupdate run --token "$CLOUDFLARED_TOKEN" > /tmp/cloudflared.log 2>&1 &
 echo $! > /root/cf.pid
 
-# 7. Diagnostic fallback server (recipe/diag.py), parked on :11434 when llama-server
+# 8. Diagnostic fallback server (recipe/diag.py), parked on the private backend port when llama-server
 #    is down, so health probes get an honest JSON diagnosis instead of a dead port.
 cat > /root/diag.py <<'PYEOF'
 import http.server, json, os, subprocess
@@ -144,7 +164,7 @@ except OSError:
     pass
 PYEOF
 
-# 8. Supervision loop: restart whatever dies, every 30 seconds.
+# 9. Supervision loop: restart whatever dies, every 30 seconds.
 up() { kill -0 "$(cat /root/$1 2>/dev/null)" 2>/dev/null; }
 sleep 30
 while true; do
@@ -159,7 +179,7 @@ while true; do
     echo RETRY_LLAMA_$(date -u +%H:%M:%S) >> /tmp/lane.log
     sleep 25
     if ! up llama.pid; then
-      (sleep 2; python3 /root/diag.py >> /tmp/diag_run.log 2>&1) &
+      (sleep 2; ORIGIN_BACKEND_PORT="$ORIGIN_BACKEND_PORT" python3 /root/diag.py >> /tmp/diag_run.log 2>&1) &
       echo $! > /root/diag.pid
     fi
   fi
