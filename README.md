@@ -1,6 +1,6 @@
 # SZL Inference Gateway
 
-Source and public posture checks for the **x402-metered inference gateway** on SaladCloud GPUs. This repository contains the boot recipe, supervision, diagnostic fallback, and a fail-closed Python audit. **Cloudflare challenges are not proof that the origin verifies signed PAYMENT-CONTEXT or that paid generation is safe.** Production origin authorization remains **HOLD** pending separately reviewed signed-JWT verification and live negative tests (see issue #7).
+Source and public posture checks for the **x402-metered inference gateway** on SaladCloud GPUs. The boot recipe now places a fail-closed signed PAYMENT-CONTEXT origin gate in front of llama-server. Per-request admission is granted only after Ed25519 JWT, exact-route, timing, amount, pinned-JWKS and replay checks pass. Live deployment evidence remains separate from this source contract.
 
 ## Historical public reachability observation (2026-11-15; not current release admission)
 
@@ -24,10 +24,11 @@ Cloudflare zone (a-11-oy.com)
    |- Cloudflare Tunnel (cloudflared; tunnel token at runtime, never committed)
           v
 SaladCloud GPU container (RTX 4090-class)
-   |- llama-server (PrismML-Eng llama.cpp fork, CUDA 12.8 build)
+   |- origin proxy (:11434; signed PAYMENT-CONTEXT gate)
+   |- llama-server (:11435 loopback only; PrismML-Eng fork, CUDA 12.8)
    |     model: Ternary-Bonsai-2-27B-PQ2_0 (7,206,168,928 bytes, from the Hugging Face Hub)
-   |- supervision loop (30 s; restarts llama-server / cloudflared)
-   |- diagnostic fallback server (port 11434 while llama-server is down)
+   |- supervision loop (30 s; restarts origin proxy, llama-server / cloudflared)
+   |- diagnostic fallback server (:11435 loopback while llama-server is down)
 ```
 
 ## Why a llama.cpp fork
@@ -37,11 +38,18 @@ Mainline llama.cpp (b12359 at the time of the cutover) cannot load the `PQ2_0` q
 ## Deploy
 
 1. Create a SaladCloud container: GPU class >= RTX 4090, instance storage >= 12 GB. Instance storage persists across config-roll restarts, so the 7.2 GB model downloads once.
-2. Set the environment: `CLOUDFLARED_TOKEN` = your cloudflared tunnel run token. **Never commit tokens**; the deployed instance receives it at runtime.
+2. Set runtime secrets `CLOUDFLARED_TOKEN`, `PAYMENT_CONTEXT_JWKS_FILE` and `PAYMENT_CONTEXT_JWKS_SHA256`. The JWKS file must be injected by the platform and its digest must be independently recorded. **Never commit tokens, keys or JWKS bytes**.
 3. Container command: `bash -lc recipe/entrypoint.sh`.
 
 The recipe's boot order is the load-bearing part: **model first, server second.** Nothing serves until the full model file is on disk and verified (resume + retry; exact size and pinned sha256 at a pinned Hub revision; HTTP errors never written into the file), the server binary comes from the pinned fork release, all CUDA shared objects are copied onto the loader path next to the binary, and a 30 s supervision loop restarts whatever dies. If the inference server cannot come up, a diagnostic JSON server parks on the port so health probes get an honest diagnosis instead of a dead port.
 
+## Signed origin admission
+
+`recipe/origin_proxy.py` owns the tunnel port and forwards only the exact paid
+chat route after `src/szl_inference_gateway/origin_gate.py` authorizes the
+`PAYMENT-CONTEXT` header. The raw llama backend binds to loopback `:11435`.
+Missing or invalid runtime JWKS configuration stops boot before the model is
+served. See `docs/PAYMENT_CONTEXT_GATE.md` for the operator contract.
 ## Cloudflare + x402 monetization
 
 The monetization worker is zone-wide: it follows any origin behind the zone automatically, so cutover to this origin was a single DNS record change (CNAME to the tunnel) and **rollback is the same single DNS PATCH back**. Pricing lives in the worker (USDC on Base, $0.02 per request). See the [Cloudflare monetization gateway docs](https://developers.cloudflare.com/monetization-gateway/) and the [x402 specification](https://github.com/x402-foundation/x402).
@@ -67,7 +75,7 @@ For an **independently authorized** bounded x402 challenge check only, the opera
 
 ## Scope & limits
 
-This repository documents the source-owned gateway and separately distinguishes read-only discovery, x402 challenge posture and origin authorization. **The source boot recipe does not yet enforce the origin-side signed PAYMENT-CONTEXT gate.** It does not claim model quality, SLA, uptime, or paid-transaction correctness beyond the receipts linked above. Fail-closed: the probe reports what it measured, or an error - never a fake ready state.
+This repository documents the source-owned gateway and separately distinguishes read-only discovery, x402 challenge posture and signed origin authorization. The recipe enforces the origin-side gate before paid forwarding and fails boot when its runtime JWKS configuration is absent. It does not claim model quality, SLA, uptime, or paid-transaction correctness beyond the receipts linked above. The probe reports what it measured, or an error - never a fake ready state.
 
 ## License
 
