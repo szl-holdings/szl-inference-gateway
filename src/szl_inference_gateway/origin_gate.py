@@ -41,8 +41,7 @@ class ReplayCache:
             if digest in self._entries:
                 raise ValueError("PAYMENT_CONTEXT_REPLAY")
             if len(self._entries) >= self._max_entries:
-                oldest = min(self._entries, key=self._entries.get)
-                del self._entries[oldest]
+                raise ValueError("PAYMENT_CONTEXT_REPLAY_CACHE_FULL")
             self._entries[digest] = now_unix + MAX_LIFETIME_SECONDS
 
 
@@ -88,6 +87,7 @@ def authorize_payment_context(
             "SIGNATURE_OR_AUDIENCE_INVALID", "AUDIENCE_INVALID",
             "PAYMENT_SCHEME_INVALID", "PAYMENT_AMOUNT_INVALID",
             "TIME_CLAIM_INVALID", "PAYMENT_CONTEXT_REPLAY",
+            "PAYMENT_CONTEXT_REPLAY_CACHE_FULL",
         } else "PAYMENT_CONTEXT_DENIED"
         return {
             "state": "HOLD",
