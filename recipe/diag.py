@@ -1,7 +1,7 @@
-"""Diagnostic fallback server for the SZL Inference Gateway recipe.
+"""Private diagnostic fallback for the SZL Inference Gateway recipe.
 
-Parked on the inference port while llama-server is down, so health probes
-through the tunnel get an honest JSON diagnosis instead of a dead port.
+The origin proxy owns the public port. This fallback only binds the loopback
+llama backend port while the model server is down.
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main() -> None:
     try:
-        http.server.ThreadingHTTPServer(("127.0.0.1", 11434), Handler).serve_forever()
+        http.server.ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("ORIGIN_BACKEND_PORT", "11435"))), Handler).serve_forever()
     except OSError:
         pass
 
