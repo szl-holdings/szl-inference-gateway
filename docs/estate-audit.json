@@ -1,0 +1,36 @@
+{
+  "metadata": {
+    "repo_name": "szl-inference-gateway",
+    "last_audit_date": "2026-11-24",
+    "loop_level": 1
+  },
+  "estate_context": {
+    "purpose_domain": "x402-metered inference gateway on SaladCloud GPUs, with fail-closed signed PAYMENT-CONTEXT origin admission before llama-server and live deployment evidence separate from the source contract",
+    "baseline_commit": "66efc31666e4f27eb0507a76c9f632605854630c",
+    "leader_profiles": [
+      {
+        "name": "vllm-project/vllm (assigned szl-inference-gateway domain leader)",
+        "url": "https://github.com/vllm-project/vllm",
+        "checked_date": "2026-11-24"
+      }
+    ]
+  },
+  "evidence_index": {
+    "publications": [
+      {
+        "id": "github:vllm-project/vllm",
+        "link": "https://github.com/vllm-project/vllm",
+        "applicability": "Assigned canonical LLM-serving leader relevant to the metered inference gateway domain."
+      }
+    ],
+    "gap_register": [
+      "No vLLM conformance evidence was measured at the baseline commit; the assigned leader's applicability is canonical and domain-based rather than verified interoperability evidence.",
+      "Current live deployment and public-reachability evidence remain separate from the source contract; the README observation is historical as of 2026-11-15 and is not current release admission."
+    ],
+    "prioritized_changes": [
+      "Verify vLLM interoperability or explicitly record that the llama-server implementation is not vLLM-conformant.",
+      "Attach separately identified current deployment evidence and distinguish it from the historical public-reachability observation without treating it as source-contract admission."
+    ]
+  },
+  "execution_trace": {}
+}
