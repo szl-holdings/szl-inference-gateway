@@ -16,10 +16,14 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from szl_inference_gateway.origin_allowlist import (  # noqa: E402
+    OriginConfigError,
+    assess_redirect,
+    load_pinned_origin,
+)
 from szl_inference_gateway.origin_gate import ReplayCache, authorize_payment_context  # noqa: E402
 
 MESSAGE_LIMIT = 1_048_576
-RESOURCE_PATH = "/v1/chat/completions"
 
 
 def _json(status: int, body: dict) -> tuple[int, bytes, str]:
@@ -44,14 +48,35 @@ class OriginHandler(BaseHTTPRequestHandler):
         self._send(code, payload, kind)
 
     def _backend(self, method: str, path: str, body: bytes | None = None) -> None:
-        conn = http.client.HTTPConnection("127.0.0.1", self.server.backend_port, timeout=10)
+        # Re-bind to literals so the outbound request-target is not the
+        # caller's string, even when the caller already compared it.
+        if path == "/health":
+            safe_path = "/health"
+        elif path == "/v1/models":
+            safe_path = "/v1/models"
+        elif path == "/v1/chat/completions":
+            safe_path = "/v1/chat/completions"
+        else:
+            self._deny("ROUTE_NOT_EXPOSED", 404)
+            return
+        pin = self.server.pin
+        if pin.scheme != "http" or pin.host != "127.0.0.1" or type(pin.port) is not int:
+            self._deny("ORIGIN_NOT_ALLOWLISTED", 502)
+            return
+        conn = http.client.HTTPConnection("127.0.0.1", pin.port, timeout=10)
         try:
             headers = {"Connection": "close"}
             if body is not None:
                 headers["Content-Type"] = self.headers.get("Content-Type", "application/json")
                 headers["Content-Length"] = str(len(body))
-            conn.request(method, path, body=body, headers=headers)
+            conn.request(method, safe_path, body=body, headers=headers)
             response = conn.getresponse()
+            if 300 <= response.status < 400:
+                location = response.getheader("Location") or ""
+                assess_redirect(location, pin=pin)
+                response.read(MESSAGE_LIMIT + 1)
+                self._deny("BACKEND_REDIRECT_REJECTED", 502)
+                return
             payload = response.read(MESSAGE_LIMIT + 1)
             if len(payload) > MESSAGE_LIMIT:
                 self._deny("BACKEND_RESPONSE_TOO_LARGE", 502)
@@ -64,13 +89,18 @@ class OriginHandler(BaseHTTPRequestHandler):
             conn.close()
 
     def do_GET(self) -> None:
-        if self.path not in ("/health", "/v1/models"):
-            self._deny("ROUTE_NOT_EXPOSED", 404)
+        if self.path == "/health":
+            self._backend("GET", "/health")
             return
-        self._backend("GET", self.path)
+        if self.path == "/v1/models":
+            self._backend("GET", "/v1/models")
+            return
+        self._deny("ROUTE_NOT_EXPOSED", 404)
 
     def do_POST(self) -> None:
-        if self.path != RESOURCE_PATH:
+        if self.path == "/v1/chat/completions":
+            safe_path = "/v1/chat/completions"
+        else:
             self._deny("ROUTE_NOT_EXPOSED", 404)
             return
         try:
@@ -88,7 +118,7 @@ class OriginHandler(BaseHTTPRequestHandler):
         gate = authorize_payment_context(
             self.headers,
             method="POST",
-            path=self.path,
+            path=safe_path,
             now_unix=int(time.time()),
             jwks_bytes=self.server.jwks_bytes,
             expected_jwks_sha256=self.server.jwks_sha256,
@@ -97,7 +127,7 @@ class OriginHandler(BaseHTTPRequestHandler):
         if gate["inference_forward_authorized"] is not True:
             self._deny(gate["reason"] or "PAYMENT_CONTEXT_DENIED")
             return
-        self._backend("POST", self.path, body)
+        self._backend("POST", safe_path, body)
 
     def log_message(self, *_args) -> None:
         if os.environ.get("ORIGIN_GATE_VERBOSE") == "1":
@@ -108,8 +138,14 @@ class OriginServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, address, handler, *, backend_port: int, jwks_bytes: bytes, jwks_sha256: str):
+        pin = load_pinned_origin(
+            backend_port,
+            env_port=None,
+            entrypoint=Path(__file__).resolve().parent / "entrypoint.sh",
+        )
         super().__init__(address, handler)
-        self.backend_port = backend_port
+        self.pin = pin
+        self.backend_port = pin.port
         self.jwks_bytes = jwks_bytes
         self.jwks_sha256 = jwks_sha256
         self.replay_cache = ReplayCache()
@@ -119,8 +155,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--listen-host", default=os.environ.get("ORIGIN_GATE_HOST", "127.0.0.1"))
     parser.add_argument("--listen-port", type=int, default=int(os.environ.get("ORIGIN_GATE_PORT", "11434")))
-    parser.add_argument("--backend-port", type=int, default=int(os.environ.get("ORIGIN_BACKEND_PORT", "11435")))
+    parser.add_argument("--backend-port", type=int, default=None)
     args = parser.parse_args()
+    try:
+        pin = load_pinned_origin(
+            args.backend_port,
+            env_port=os.environ.get("ORIGIN_BACKEND_PORT"),
+            entrypoint=Path(__file__).resolve().parent / "entrypoint.sh",
+        )
+    except OriginConfigError as exc:
+        raise SystemExit(exc.reason) from exc
     jwks_file = os.environ.get("PAYMENT_CONTEXT_JWKS_FILE", "")
     jwks_sha256 = os.environ.get("PAYMENT_CONTEXT_JWKS_SHA256", "")
     if not jwks_file or not jwks_sha256:
@@ -132,11 +176,11 @@ def main() -> None:
     server = OriginServer(
         (args.listen_host, args.listen_port),
         OriginHandler,
-        backend_port=args.backend_port,
+        backend_port=pin.port,
         jwks_bytes=jwks,
         jwks_sha256=jwks_sha256,
     )
-    print(json.dumps({"origin_gate": "ready", "listen_port": args.listen_port, "backend_port": args.backend_port}), flush=True)
+    print(json.dumps({"origin_gate": "ready", "listen_port": args.listen_port, "backend_port": pin.port}), flush=True)
     server.serve_forever()
 
 
